@@ -1,0 +1,7 @@
+---
+
+- name: DFS | Verify required variables are defined
+  assert:
+    that: 
+      - domain_name        is defined
+      - win_dfs_namespaces is defined

@@ -1,0 +1,100 @@
+---
+
+- name: DFS | Execute pre-checks
+  include_tasks: pre_checks.yml
+
+- name: DFS | Create list of DFS hosts
+  set_fact:
+    dfs_targets: "{{ ansible_play_hosts | map('extract', hostvars, 'ansible_fqdn') | list | sort }}"
+
+- name: DFS | Install DFS Namespaces role
+  win_feature:
+    name: FS-DFS-Namespace
+    include_management_tools: yes
+    state: present
+
+- name: DFS | Start DFS Namespace service
+  win_service:
+    name: Dfs
+    state: started
+
+- name: DFS | Create root directories for namespaces
+  win_file:
+    path: "{{ item.root_path }}\\{{ item.name }}"
+    state: directory
+  loop: "{{ win_dfs_namespaces }}"
+  loop_control:
+    label: "{{ item.root_path }}\\{{ item.name }}"
+
+- name: DFS | Create directories for shares
+  win_file:
+    path: "{{ item.0.root_path }}\\{{ item.1.name }}"
+    state: directory
+  with_subelements:
+    - "{{ win_dfs_namespaces }}"
+    - shares
+  loop_control:
+    label: "{{ item.0.root_path }}\\{{ item.1.name }}"
+
+# Set share permissions to full for everyone.
+# Permissions are managed through filesystem ACLs.
+- name: DFS | Share root directories
+  win_share:
+    name:        "{{ item.name }}"
+    path:        "{{ item.root_path }}\\{{ item.name }}"
+    description: "{{ item.description | default(omit) }}"
+    full:        Everyone
+    state:       present
+  loop: "{{ win_dfs_namespaces }}"
+  loop_control:
+    label: "{{ item.root_path }}\\{{ item.name }}"
+
+- name: DFS | Share directories
+  win_share:
+    name:        "{{ item.1.name }}"
+    path:        "{{ item.0.root_path }}\\{{ item.1.name }}"
+    description: "{{ item.1.description | default(omit) }}"
+    full:        Everyone
+    state:       present
+  with_subelements:
+    - "{{ win_dfs_namespaces }}"
+    - shares
+  loop_control:
+    label: "{{ item.0.root_path }}\\{{ item.1.name }}"
+
+- name: DFS | Create DFS namespaces
+  win_dfs_namespace_root:
+    path: '\\{{ domain_name }}\{{ item.name }}'
+    targets: "{{ dfs_targets | map('mkot02.win_fs_dfs.unc_path', item.name) | list }}"
+    type: "DomainV2"
+    description: "{{ item.description | default(omit) }}"
+    access_based_enumeration: "{{ item.options.access_based_enumeration | default(omit) }}"
+    insite_referrals: "{{ item.options.insite_referrals | default(omit) }}"
+    root_scalability: "{{ item.options.root_scalability | default(omit) }}"
+    site_costing: "{{ item.options.site_costing | default(omit) }}"
+    target_failback: "{{ item.options.target_failback | default(omit) }}"
+    ttl: "{{ item.options.ttl | default(omit) }}"
+    state: present
+  loop: "{{ win_dfs_namespaces }}"
+  loop_control:
+    label: "{{ item.name }}"
+  run_once: true
+
+- name: DFS | Create DFS folders
+  win_dfs_namespace_folder:
+    path: '\\{{ domain_name }}\{{ item.0.name }}\{{ item.1.name }}'
+    targets: "{{ dfs_targets | map('mkot02.win_fs_dfs.unc_path', item.1.name) | list }}"
+    description: "{{ item.1.description | default(omit) }}"
+    insite_referrals: "{{ item.0.options.insite_referrals | default(omit) }}"
+    target_failback: "{{ item.0.options.target_failback | default(omit) }}"
+    state: present
+  with_subelements:
+    - "{{ win_dfs_namespaces }}"
+    - shares
+  loop_control:
+    label: "{{ item.1.name }}"
+  run_once: true
+
+- name: DFS | Configure DFS replication
+  include_tasks: replication.yml
+  when: (ansible_play_hosts|length) > 1

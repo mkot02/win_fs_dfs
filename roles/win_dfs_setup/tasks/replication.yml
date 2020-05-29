@@ -1,0 +1,33 @@
+---
+
+- name: DFS | Install DFS Replication role
+  win_feature:
+    name: FS-DFS-Replication
+    include_management_tools: yes
+    state: present
+
+- name: DFS | Start DFS Replication service
+  win_service:
+    name: DFSR
+    state: started
+
+# Create separate replication group for each DFSN folder.
+- name: DFS | Configure DFS replication
+  win_dfs_replication_group:
+    name: "{{ item.0.name }}/{{ item.1.name }}"
+    members: "{{ dfs_targets }}"
+    folders:
+      - name: "{{ item.1.name }}"
+        content_path: '{{ item.0.root_path }}\{{ item.1.name }}'
+        dfsn_path: '\\{{ domain_name }}\{{ item.0.name }}\{{ item.1.name }}'
+        exclude_files: "{{ item.1.exclude_files | default(omit) }}"
+        exclude_dirs: "{{ item.1.exclude_dirs | default(omit) }}"
+    staging_quota: "{{ win_dfsr_stage_size | default(omit) }}"
+    conflict_and_deleted_quota: "{{ win_dfsr_conflicted_size | default(omit) }}"
+    state: present
+  with_subelements:
+    - "{{ win_dfs_namespaces }}"
+    - shares
+  loop_control:
+    label: "{{ item.0.name }}/{{ item.1.name }}"
+  run_once: true
